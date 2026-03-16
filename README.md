@@ -9,3 +9,4 @@ A Random Forest model was trained using 3-fold cross-validation to predict wheth
 
 ### How to View the Report
 The compiled HTML report is hosted via GitHub Pages. 
+**[Click here to view the live HTML report.](https://tulsidai.github.io/Practical-Machine-Learning-Course-Project/)**
