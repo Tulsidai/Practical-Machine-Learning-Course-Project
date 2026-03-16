@@ -1,0 +1,123 @@
+---
+title: "Practical Machine Learning: Course Project"
+author: "Tulsidai Singh"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float: true
+---
+
+```{r}
+#| label: setup
+#| include: FALSE
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 8, fig.height = 5)
+```
+
+## Background
+
+Fitness trackers collect a lot of data on *how much* activity people do, but almost none on *how well* they do it. This project uses accelerometer data from six participants performing barbell lifts to build a model that classifies whether each lift was done correctly or not.
+
+The target variable is `classe`:
+
+- **A** — correct form  
+- **B** — elbows thrown forward  
+- **C** — dumbbell lifted only halfway  
+- **D** — dumbbell lowered only halfway  
+- **E** — hips thrown forward  
+
+## Data Preparation
+
+```{r}
+#| label: load_data
+library(caret)
+library(randomForest)
+library(ggplot2)
+
+train_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_url  <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+raw_train <- read.csv(train_url, na.strings = c("NA", "#DIV/0!", ""))
+raw_test  <- read.csv(test_url,  na.strings = c("NA", "#DIV/0!", ""))
+```
+
+The raw data has 160 columns, most of which are summary statistics that are blank for the vast majority of rows. Those get dropped, along with the first seven columns (row IDs, participant names, timestamps) that have nothing to do with movement quality.
+
+```{r}
+#| label: clean_data
+na_threshold <- colSums(is.na(raw_train)) / nrow(raw_train)
+clean_train  <- raw_train[, na_threshold < 0.9]
+clean_test   <- raw_test[,  na_threshold < 0.9]
+
+clean_train <- clean_train[, -c(1:7)]
+clean_test  <- clean_test[,  -c(1:7)]
+
+clean_train$classe <- as.factor(clean_train$classe)
+
+dim(clean_train)
+```
+
+That leaves 52 predictors and the target — down from 160.
+
+## Cross-Validation Setup
+
+The cleaned training data is split 70/30. The 70% trains the model; the held-out 30% gives an honest estimate of out-of-sample performance.
+
+```{r}
+#| label: split_data
+set.seed(2024)
+inTrain   <- createDataPartition(clean_train$classe, p = 0.7, list = FALSE)
+train_set <- clean_train[inTrain, ]
+valid_set <- clean_train[-inTrain, ]
+```
+
+## Model Building
+
+A Random Forest was chosen for a few reasons: it handles the high dimensionality well, it's robust to outliers, and it generally performs well on this type of classification task without much tuning. Training uses 3-fold cross-validation and 100 trees, enough for convergence and fast enough to run in reasonable time.
+
+```{r}
+#| label: train_model
+#| cache: TRUE
+cv_control <- trainControl(method = "cv", number = 3, verboseIter = FALSE)
+
+rf_model <- train(classe ~ .,
+                  data      = train_set,
+                  method    = "rf",
+                  trControl = cv_control,
+                  ntree     = 100)
+
+rf_model$finalModel
+```
+
+### Variable Importance
+
+```{r}
+#| label: plot_importance
+#| fig.cap: "Top 20 Most Important Predictors"
+plot(varImp(rf_model), top = 20, main = "Top 20 Variable Importance")
+```
+
+Belt roll and forearm pitch are the strongest predictors which makes sense given that those are the body parts most visibly affected by the four mistake classes.
+
+## Out-of-Sample Error Estimate
+
+```{r}
+#| label: validation
+valid_predictions <- predict(rf_model, valid_set)
+conf_matrix       <- confusionMatrix(valid_predictions, valid_set$classe)
+conf_matrix
+```
+
+The model achieves **`r round(conf_matrix$overall['Accuracy'] * 100, 2)`%** accuracy on the validation set, putting the estimated out-of-sample error at **`r round((1 - conf_matrix$overall['Accuracy']) * 100, 2)`%**. That's low enough to feel confident about applying it to the 20 test cases.
+
+## Test Set Predictions
+
+```{r}
+#| label: final_predictions
+final_predictions <- predict(rf_model, clean_test)
+data.frame(Problem_ID = clean_test$problem_id, Predicted_Classe = final_predictions)
+```
+
+*Data source: Human Activity Recognition project — http://groupware.les.inf.puc-rio.br/har*
